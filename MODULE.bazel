@@ -124,11 +124,11 @@ local_torch(name = "libtorch")
 #    path = "/path/to/executorch",
 #)
 
-#new_local_repository(
-#   name = "tensorrt",
-#   path = "/usr/",
-#   build_file = "@//third_party/tensorrt/local:BUILD"
-#)
+new_local_repository(
+   name = "tensorrt",
+   path = "/opt/tensorrt/",
+   build_file = "@//third_party/tensorrt/local:BUILD"
+)
 
 #############################################################################################################
 # Tarballs and fetched dependencies (default - use in cases when building from precompiled bin and tarballs)
@@ -175,15 +175,15 @@ http_archive(
 # Either place them in the distdir directory in third_party and use the --distdir flag
 # or modify the urls to "file:///<PATH TO ARCHIVE>/<ARCHIVE NAME>"
 
-http_archive(
-    name = "tensorrt",
-    build_file = "@//third_party/tensorrt/archive:BUILD",
-    strip_prefix = "TensorRT-11.0.0.114",
-    type = "tar.zst",
-    urls = [
-        "https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/11.0.0/tars/TensorRT-Enterprise-11.0.0.114-Linux-x86_64-cuda-13.2-Release-external.tar.zst",
-    ],
-)
+# http_archive(
+#     name = "tensorrt",
+#     build_file = "@//third_party/tensorrt/archive:BUILD",
+#     strip_prefix = "TensorRT-11.0.0.114",
+#     type = "tar.zst",
+#     urls = [
+#         "https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/11.0.0/tars/TensorRT-Enterprise-11.0.0.114-Linux-x86_64-cuda-13.2-Release-external.tar.zst",
+#     ],
+# )
 
 http_archive(
     name = "tensorrt_rtx",
