@@ -37,7 +37,7 @@ pre_lowering_pass_list = [
 post_lowering_pass_list = [
     replace_fused_rms_norm,
     remove_input_alias_fixing_clones,
-    constant_fold,
+    # constant_fold,  # TEMP: bypass for exp2_no_const_folding
     repair_input_as_output,
     fuse_prims_broadcast,
     replace_max_pool_with_indices,
