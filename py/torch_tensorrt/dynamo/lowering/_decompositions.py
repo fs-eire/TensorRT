@@ -491,11 +491,9 @@ def scaled_dot_product_attention_decomposition(
     L, S = query.size(-2), key.size(-2)
     device = query.device
 
-    if is_causal or attn_mask is not None:
-        attn_bias = torch.zeros((L, S), dtype=query.dtype, device=device)
-
     if is_causal:
         assert attn_mask is None, "attn_mask must be None when is_causal=True"
+        attn_bias = torch.zeros((L, S), dtype=query.dtype, device=device)
         temp_mask = torch.ones((L, S), dtype=torch.bool, device=device).tril(diagonal=0)
         attn_bias = attn_bias.masked_fill(temp_mask.logical_not(), float("-inf"))
 
@@ -504,8 +502,15 @@ def scaled_dot_product_attention_decomposition(
         # rule is disabled, so the decompositions do not need the setting.
         exclude_attn_mask_aranges_from_constant_fold(attn_mask)
         if attn_mask.dtype == torch.bool:
-            attn_bias = attn_bias.masked_fill(attn_mask.logical_not(), float("-inf"))
+            # Keep the mask condition in its valid=True orientation and use scalar
+            # constants so TensorRT can recognize the additive-attention-mask pattern.
+            zero = torch.full((), 0.0, dtype=query.dtype, device=device)
+            negative = torch.full(
+                (), torch.finfo(query.dtype).min, dtype=query.dtype, device=device
+            )
+            attn_bias = torch.where(attn_mask, zero, negative)
         else:
+            attn_bias = torch.zeros((L, S), dtype=query.dtype, device=device)
             attn_bias = attn_mask + attn_bias
 
     if enable_gqa:
