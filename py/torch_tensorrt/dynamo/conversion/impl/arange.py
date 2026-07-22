@@ -55,12 +55,12 @@ def arange(
     dtype: Optional[torch.dtype] = None,
 ) -> TRTTensor:
     """
-    Creates a sequence of values (arange) either dynamically or statically,
-    then outputs a TensorRT tensor.
+    Creates a sequence of values (arange) with a TensorRT Fill layer.
 
-    If any of (start, end, step) is a TRT tensor, it sets up a dynamic arange
-    using a Fill layer. Otherwise, the sequence is computed at build time and
-    frozen into a TensorRT constant tensor.
+    If any of (start, end, step) is a TRT tensor, the Fill output length is
+    computed dynamically. Otherwise, torch is used only to determine the static
+    output shape and dtype. Keeping static ranges as Fill layers preserves their
+    sequence provenance for downstream TensorRT graph-pattern recognition.
     """
     # If any argument is a TRT tensor, use dynamic arange with a Fill layer
     if any(isinstance(x, TRTTensor) for x in (start, end, step)):
@@ -122,27 +122,42 @@ def arange(
         return fill_layer.get_output(0)
 
     else:
-        # All arguments are static, so evaluate the sequence eagerly and freeze it
-        # into the engine as a constant. NumPy avoids creating a FakeTensor when
-        # conversion runs inside torch.compile's active FakeTensorMode.
+        # Keep a static arange as LINSPACE rather than materializing its values in
+        # a Constant. NumPy determines the shape and dtype without creating a
+        # FakeTensor when conversion runs inside torch.compile's FakeTensorMode.
         resolved_dtype = dtype
         if resolved_dtype is None and any(
             isinstance(value, float) for value in (start, end, step)
         ):
             resolved_dtype = torch.get_default_dtype()
-        constant_dtype = None
+        fallback_dtype = None
         if resolved_dtype is not None:
             try:
                 np_dtype = _enums.dtype._from(resolved_dtype).to(np.dtype)
             except TypeError:
                 # Some TensorRT dtypes, such as BF16, have no NumPy
-                # representation. Build the sequence in NumPy's inferred dtype
-                # and let constant creation cast it to the requested dtype.
+                # representation. Use NumPy only for the output shape and keep
+                # the requested dtype for the TensorRT Fill layer.
                 np_dtype = None
-                constant_dtype = resolved_dtype
+                fallback_dtype = resolved_dtype
         else:
             np_dtype = None
         values = np.arange(start, end, step, dtype=np_dtype)
         if values.dtype == np.int64:
             values = values.astype(np.int32)
-        return get_trt_tensor(ctx, values, f"{name}_arange_const", dtype=constant_dtype)
+        value_dtype = _enums.dtype._from(
+            fallback_dtype if fallback_dtype is not None else values.dtype
+        ).to(trt.DataType)
+        start_tensor = get_trt_tensor(
+            ctx, start, name + "_start", dtype=value_dtype, min_rank=0
+        )
+        step_tensor = get_trt_tensor(
+            ctx, step, name + "_step", dtype=value_dtype, min_rank=1
+        )
+        fill_layer = ctx.net.add_fill(
+            tuple(values.shape), trt.FillOperation.LINSPACE, value_dtype
+        )
+        fill_layer.set_input(1, start_tensor)
+        fill_layer.set_input(2, step_tensor)
+        set_layer_name(fill_layer, target, f"{name}_arange_fill", source_ir)
+        return fill_layer.get_output(0)
