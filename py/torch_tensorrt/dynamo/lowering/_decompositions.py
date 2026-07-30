@@ -1,7 +1,7 @@
 import logging
 from enum import Enum, auto
 from functools import wraps
-from typing import Any, Callable, Collection, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch._decomp import register_decomposition
@@ -22,11 +22,7 @@ from ._decomposition_groups import (
     torch_disabled_decompositions,
     torch_enabled_decompositions,
 )
-from ._no_constant_fold import (
-    ATTENTION_MASK_ARANGE_RULE_ID,
-    is_no_constant_fold_rule_enabled,
-    mark_attn_mask_aranges_no_constant_fold,
-)
+from ._no_constant_fold import mark_attn_mask_aranges_no_constant_fold
 
 logger = logging.getLogger(__name__)
 
@@ -476,7 +472,6 @@ def scaled_dot_product_attention_decomposition(
     scale: Optional[float] = None,
     enable_gqa: bool = False,
     use_fp32_acc: bool = False,
-    enable_attention_mask_no_constant_fold_rule: bool = True,
 ) -> torch.Tensor:
     output_dtype = query.dtype
     promote_intermediates = use_fp32_acc and query.dtype == torch.float16
@@ -500,8 +495,9 @@ def scaled_dot_product_attention_decomposition(
         attn_bias = attn_bias.masked_fill(temp_mask.logical_not(), float("-inf"))
 
     if attn_mask is not None:
-        if enable_attention_mask_no_constant_fold_rule:
-            mark_attn_mask_aranges_no_constant_fold(attn_mask)
+        # Unconditional: mark_no_constant_fold_nodes revokes these marks when the
+        # rule is disabled, so the decompositions do not need the setting.
+        mark_attn_mask_aranges_no_constant_fold(attn_mask)
         if attn_mask.dtype == torch.bool:
             attn_bias = attn_bias.masked_fill(attn_mask.logical_not(), float("-inf"))
         else:
@@ -543,7 +539,6 @@ def scaled_dot_product_flash_attention_decomposition(
     *,
     scale: Optional[float] = None,
     use_fp32_acc: bool = False,
-    enable_attention_mask_no_constant_fold_rule: bool = True,
 ) -> Tuple[
     torch.Tensor,
     torch.Tensor,
@@ -564,9 +559,6 @@ def scaled_dot_product_flash_attention_decomposition(
         is_causal,
         scale=scale,
         use_fp32_acc=use_fp32_acc,
-        enable_attention_mask_no_constant_fold_rule=(
-            enable_attention_mask_no_constant_fold_rule
-        ),
     )
     return attn, None, None, None, 0, 0, None, None, None
 
@@ -585,7 +577,6 @@ def scaled_dot_product_efficient_attention_decomposition(
     *,
     scale: Optional[float] = None,
     use_fp32_acc: bool = False,
-    enable_attention_mask_no_constant_fold_rule: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     attn = scaled_dot_product_attention_decomposition(
         query,
@@ -596,9 +587,6 @@ def scaled_dot_product_efficient_attention_decomposition(
         is_causal,
         scale=scale,
         use_fp32_acc=use_fp32_acc,
-        enable_attention_mask_no_constant_fold_rule=(
-            enable_attention_mask_no_constant_fold_rule
-        ),
     )
     return attn, None, None, None
 
@@ -618,7 +606,6 @@ def scaled_dot_product_cudnn_attention_decomposition(
     *,
     scale: Optional[float] = None,
     use_fp32_acc: bool = False,
-    enable_attention_mask_no_constant_fold_rule: bool = True,
 ) -> Tuple[
     torch.Tensor,
     torch.Tensor,
@@ -639,9 +626,6 @@ def scaled_dot_product_cudnn_attention_decomposition(
         is_causal,
         scale=scale,
         use_fp32_acc=use_fp32_acc,
-        enable_attention_mask_no_constant_fold_rule=(
-            enable_attention_mask_no_constant_fold_rule
-        ),
     )
     return attn, None, None, None, 0, 0, None, None, None
 
@@ -720,21 +704,15 @@ ATTENTION_DECOMPOSITIONS: Dict[OpOverload, Callable[..., Any]] = {
 ATTENTION_DECOMPOSITION_OPS = set(ATTENTION_DECOMPOSITIONS)
 
 
-def _configure_attention_decomposition(
+def _enable_fp32_accumulation(
     decomposition: Callable[..., Any],
-    *,
-    use_fp32_acc: bool,
-    enable_attention_mask_no_constant_fold_rule: bool,
 ) -> Callable[..., Any]:
     @wraps(decomposition)
-    def configured_attention_decomposition(*args: Any, **kwargs: Any) -> Any:
-        kwargs["use_fp32_acc"] = use_fp32_acc
-        kwargs["enable_attention_mask_no_constant_fold_rule"] = (
-            enable_attention_mask_no_constant_fold_rule
-        )
+    def fp32_accumulation_decomposition(*args: Any, **kwargs: Any) -> Any:
+        kwargs["use_fp32_acc"] = True
         return decomposition(*args, **kwargs)
 
-    return configured_attention_decomposition
+    return fp32_accumulation_decomposition
 
 
 def get_decompositions(
@@ -742,14 +720,7 @@ def get_decompositions(
     decompose_attention: bool = False,
     use_distributed_mode_trace: bool = False,
     use_fp32_acc: bool = False,
-    disabled_no_constant_fold_rules: Collection[str] = (),
 ) -> Dict[OpOverload, Callable[[Any], Any]]:
-    enable_attention_mask_no_constant_fold_rule = (
-        is_no_constant_fold_rule_enabled(
-            ATTENTION_MASK_ARANGE_RULE_ID,
-            disabled_no_constant_fold_rules,
-        )
-    )
     trt_decomps = (
         dict(TORCH_TRT_DECOMPOSITIONS)
         if decompose_attention
@@ -759,16 +730,10 @@ def get_decompositions(
             if k not in ATTENTION_DECOMPOSITION_OPS
         }
     )
-    if decompose_attention:
+    if decompose_attention and use_fp32_acc:
         trt_decomps.update(
             {
-                op: _configure_attention_decomposition(
-                    decomposition,
-                    use_fp32_acc=use_fp32_acc,
-                    enable_attention_mask_no_constant_fold_rule=(
-                        enable_attention_mask_no_constant_fold_rule
-                    ),
-                )
+                op: _enable_fp32_accumulation(decomposition)
                 for op, decomposition in ATTENTION_DECOMPOSITIONS.items()
             }
         )

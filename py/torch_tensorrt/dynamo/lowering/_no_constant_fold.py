@@ -95,16 +95,6 @@ def validate_disabled_no_constant_fold_rules(
     return disabled_rule_ids
 
 
-def is_no_constant_fold_rule_enabled(
-    rule_id: str,
-    disabled_rule_ids: Collection[str],
-) -> bool:
-    """Return whether a registered rule is enabled."""
-    return rule_id not in validate_disabled_no_constant_fold_rules(
-        disabled_rule_ids
-    )
-
-
 def mark_attn_mask_aranges_no_constant_fold(attn_mask: torch.Tensor) -> None:
     """Mark aranges behind an attention mask while tracing a decomposition.
 

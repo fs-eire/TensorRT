@@ -394,7 +394,6 @@ def cross_compile_for_windows(
             decompose_attention,
             use_distributed_mode_trace,
             use_fp32_acc=use_fp32_acc,
-            disabled_no_constant_fold_rules=settings.disabled_no_constant_fold_rules,
         )
     )
 
@@ -800,7 +799,6 @@ def compile(
             decompose_attention,
             use_distributed_mode_trace,
             use_fp32_acc=use_fp32_acc,
-            disabled_no_constant_fold_rules=settings.disabled_no_constant_fold_rules,
         )
     )
 
@@ -2022,7 +2020,6 @@ def convert_exported_program_to_serialized_trt_engine(
             decompose_attention,
             use_distributed_mode_trace,
             use_fp32_acc=use_fp32_acc,
-            disabled_no_constant_fold_rules=settings.disabled_no_constant_fold_rules,
         )
     )
 

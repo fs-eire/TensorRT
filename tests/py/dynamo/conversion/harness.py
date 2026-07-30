@@ -336,9 +336,6 @@ class DispatchTestCase(TRTTestCase):
                         False,
                         settings.decompose_attention,
                         use_fp32_acc=settings.use_fp32_acc,
-                        disabled_no_constant_fold_rules=(
-                            settings.disabled_no_constant_fold_rules
-                        ),
                     )
                 )
             fx_module = exported_program.module()
