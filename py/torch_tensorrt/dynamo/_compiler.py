@@ -117,6 +117,7 @@ def cross_compile_for_windows(
     cpu_memory_budget: Optional[int] = _defaults.CPU_MEMORY_BUDGET,
     dynamically_allocate_resources: bool = _defaults.DYNAMICALLY_ALLOCATE_RESOURCES,
     decompose_attention: bool = _defaults.DECOMPOSE_ATTENTION,
+    disabled_no_constant_fold_rules: Optional[Collection[str]] = None,
     attn_bias_is_causal: bool = _defaults.ATTN_BIAS_IS_CAUSAL,
     fallback_data_dependent_ops: bool = _defaults.FALLBACK_DATA_DEPENDENT_OPS,
     **kwargs: Any,
@@ -201,6 +202,10 @@ def cross_compile_for_windows(
             instead of using the attention converters. When combined with ``use_fp32_acc=True``,
             decomposed FP16 attention keeps its intermediate calculation in FP32 and casts only
             the final output back to FP16.
+        disabled_no_constant_fold_rules (Optional[Collection[str]]): IDs of
+            Torch-TensorRT rules that should not mark FX nodes as excluded from
+            constant folding. Supported IDs: ``"attention_mask_arange"``.
+            Default is None.
         attn_bias_is_causal (bool): Whether the attn_bias in efficient SDPA is causal. Default is True. This can accelerate models from HF because attn_bias is always a causal mask in HF. If you want to use non-causal attn_bias, you can set this to False.
         fallback_data_dependent_ops (bool): If True, operators whose converters require a TensorRT output allocator (i.e. data-dependent output shapes, such as nonzero) are added to torch_executed_ops and run in PyTorch instead of being lowered into a TensorRT engine. This is useful when targeting runtimes that cannot consume a TensorRT output allocator. Default is False.
         **kwargs: Any,
@@ -357,6 +362,11 @@ def cross_compile_for_windows(
         "cpu_memory_budget": cpu_memory_budget,
         "dynamically_allocate_resources": dynamically_allocate_resources,
         "decompose_attention": decompose_attention,
+        "disabled_no_constant_fold_rules": (
+            disabled_no_constant_fold_rules
+            if disabled_no_constant_fold_rules is not None
+            else set()
+        ),
         "attn_bias_is_causal": attn_bias_is_causal,
         "fallback_data_dependent_ops": fallback_data_dependent_ops,
     }
@@ -384,6 +394,7 @@ def cross_compile_for_windows(
             decompose_attention,
             use_distributed_mode_trace,
             use_fp32_acc=use_fp32_acc,
+            disabled_no_constant_fold_rules=settings.disabled_no_constant_fold_rules,
         )
     )
 
@@ -482,6 +493,7 @@ def compile(
     enable_resource_partitioning: bool = _defaults.ENABLE_RESOURCE_PARTITIONING,
     dynamically_allocate_resources: bool = _defaults.DYNAMICALLY_ALLOCATE_RESOURCES,
     decompose_attention: bool = _defaults.DECOMPOSE_ATTENTION,
+    disabled_no_constant_fold_rules: Optional[Collection[str]] = None,
     attn_bias_is_causal: bool = _defaults.ATTN_BIAS_IS_CAUSAL,
     fallback_data_dependent_ops: bool = _defaults.FALLBACK_DATA_DEPENDENT_OPS,
     **kwargs: Any,
@@ -576,6 +588,10 @@ def compile(
             instead of using the attention converters. When combined with ``use_fp32_acc=True``,
             decomposed FP16 attention keeps its intermediate calculation in FP32 and casts only
             the final output back to FP16.
+        disabled_no_constant_fold_rules (Optional[Collection[str]]): IDs of
+            Torch-TensorRT rules that should not mark FX nodes as excluded from
+            constant folding. Supported IDs: ``"attention_mask_arange"``.
+            Default is None.
         attn_bias_is_causal (bool): Whether the attn_bias in efficient SDPA is causal. Default is True. This can accelerate models from HF because attn_bias is always a causal mask in HF. If you want to use non-causal attn_bias, you can set this to False.
         fallback_data_dependent_ops (bool): If True, operators whose converters require a TensorRT output allocator (i.e. data-dependent output shapes, such as nonzero) are added to torch_executed_ops and run in PyTorch instead of being lowered into a TensorRT engine. This is useful when targeting runtimes that cannot consume a TensorRT output allocator. Default is False.
         **kwargs: Any,
@@ -765,6 +781,11 @@ def compile(
         "cpu_memory_budget": cpu_memory_budget,
         "dynamically_allocate_resources": dynamically_allocate_resources,
         "decompose_attention": decompose_attention,
+        "disabled_no_constant_fold_rules": (
+            disabled_no_constant_fold_rules
+            if disabled_no_constant_fold_rules is not None
+            else set()
+        ),
         "attn_bias_is_causal": attn_bias_is_causal,
         "fallback_data_dependent_ops": fallback_data_dependent_ops,
     }
@@ -779,6 +800,7 @@ def compile(
             decompose_attention,
             use_distributed_mode_trace,
             use_fp32_acc=use_fp32_acc,
+            disabled_no_constant_fold_rules=settings.disabled_no_constant_fold_rules,
         )
     )
 
@@ -1715,6 +1737,7 @@ def convert_exported_program_to_serialized_trt_engine(
     offload_module_to_cpu: bool = _defaults.OFFLOAD_MODULE_TO_CPU,
     use_distributed_mode_trace: bool = _defaults.USE_DISTRIBUTED_MODE_TRACE,
     decompose_attention: bool = _defaults.DECOMPOSE_ATTENTION,
+    disabled_no_constant_fold_rules: Optional[Collection[str]] = None,
     attn_bias_is_causal: bool = _defaults.ATTN_BIAS_IS_CAUSAL,
     lift_mutable_buffers: bool = False,
     arg_input_binding_names: Any = None,
@@ -1813,6 +1836,10 @@ def convert_exported_program_to_serialized_trt_engine(
             instead of using the attention converters. When combined with ``use_fp32_acc=True``,
             decomposed FP16 attention keeps its intermediate calculation in FP32 and casts only
             the final output back to FP16.
+        disabled_no_constant_fold_rules (Optional[Collection[str]]): IDs of
+            Torch-TensorRT rules that should not mark FX nodes as excluded from
+            constant folding. Supported IDs: ``"attention_mask_arange"``.
+            Default is None.
         attn_bias_is_causal (bool): Whether the attn_bias in efficient SDPA is causal. Default is True. This can accelerate models from HF because attn_bias is always a causal mask in HF. If you want to use non-causal attn_bias, you can set this to False.
         **kwargs: Any,
     Returns:
@@ -1978,6 +2005,11 @@ def convert_exported_program_to_serialized_trt_engine(
         "offload_module_to_cpu": offload_module_to_cpu,
         "use_distributed_mode_trace": use_distributed_mode_trace,
         "decompose_attention": decompose_attention,
+        "disabled_no_constant_fold_rules": (
+            disabled_no_constant_fold_rules
+            if disabled_no_constant_fold_rules is not None
+            else set()
+        ),
         "attn_bias_is_causal": attn_bias_is_causal,
     }
 
@@ -1990,6 +2022,7 @@ def convert_exported_program_to_serialized_trt_engine(
             decompose_attention,
             use_distributed_mode_trace,
             use_fp32_acc=use_fp32_acc,
+            disabled_no_constant_fold_rules=settings.disabled_no_constant_fold_rules,
         )
     )
 

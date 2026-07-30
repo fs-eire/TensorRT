@@ -5,6 +5,9 @@ from typing import Any, Callable, Optional, Sequence, Union
 import torch
 from torch_tensorrt._utils import is_tegra_platform
 from torch_tensorrt.dynamo._settings import CompilationSettings
+from torch_tensorrt.dynamo.lowering._no_constant_fold import (
+    mark_no_constant_fold_nodes,
+)
 from torch_tensorrt.dynamo.lowering.passes._FakeTensorUpdater import FakeTensorUpdater
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import (
     trace_intermediate_node_outputs,
@@ -37,6 +40,7 @@ pre_lowering_pass_list = [
 post_lowering_pass_list = [
     replace_fused_rms_norm,
     remove_input_alias_fixing_clones,
+    mark_no_constant_fold_nodes,
     constant_fold,
     repair_input_as_output,
     fuse_prims_broadcast,

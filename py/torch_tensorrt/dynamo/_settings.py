@@ -18,6 +18,7 @@ from torch_tensorrt.dynamo._defaults import (
     CACHE_BUILT_ENGINES,
     CPU_MEMORY_BUDGET,
     DECOMPOSE_ATTENTION,
+    DISABLED_NO_CONSTANT_FOLD_RULES,
     DISABLE_TF32,
     DLA_GLOBAL_DRAM_SIZE,
     DLA_LOCAL_DRAM_SIZE,
@@ -56,6 +57,17 @@ from torch_tensorrt.dynamo._defaults import (
     WORKSPACE_SIZE,
     default_device,
 )
+
+
+def _normalize_disabled_no_constant_fold_rules(
+    rule_ids: Collection[str],
+) -> Set[str]:
+    if isinstance(rule_ids, str):
+        raise TypeError(
+            "disabled_no_constant_fold_rules must be a collection of rule IDs, "
+            "not a single string"
+        )
+    return set(rule_ids)
 
 
 @dataclass
@@ -119,6 +131,9 @@ class CompilationSettings:
             instead of using the attention converters. When combined with ``use_fp32_acc=True``,
             decomposed FP16 attention keeps its intermediate calculation in FP32 and casts only
             the final output back to FP16.
+        disabled_no_constant_fold_rules (Collection[str]): IDs of Torch-TensorRT
+            rules that should not mark FX nodes as excluded from constant folding.
+            Supported IDs: ``"attention_mask_arange"``. Default is [].
         attn_bias_is_causal (bool): Whether the attn_bias in efficient SDPA is causal. Default is True. This can accelerate models from HF because attn_bias is always a causal mask in HF. If you want to use non-causal attn_bias, you can set this to False.
         fallback_data_dependent_ops (bool): If True, operators whose converters require a TensorRT output allocator (i.e. data-dependent output shapes, such as nonzero) are added to torch_executed_ops and run in PyTorch instead of being lowered into a TensorRT engine. This is useful when targeting runtimes that cannot consume a TensorRT output allocator. Default is False.
     """
@@ -178,8 +193,18 @@ class CompilationSettings:
     cpu_memory_budget: Optional[int] = CPU_MEMORY_BUDGET
     dynamically_allocate_resources: bool = DYNAMICALLY_ALLOCATE_RESOURCES
     decompose_attention: bool = DECOMPOSE_ATTENTION
+    disabled_no_constant_fold_rules: Collection[str] = field(
+        default_factory=lambda: DISABLED_NO_CONSTANT_FOLD_RULES.copy()
+    )
     attn_bias_is_causal: bool = ATTN_BIAS_IS_CAUSAL
     fallback_data_dependent_ops: bool = FALLBACK_DATA_DEPENDENT_OPS
+
+    def __post_init__(self) -> None:
+        self.disabled_no_constant_fold_rules = (
+            _normalize_disabled_no_constant_fold_rules(
+                self.disabled_no_constant_fold_rules
+            )
+        )
 
     def __getstate__(self) -> dict[str, Any]:
         from torch_tensorrt.dynamo.conversion._ConverterRegistry import (
@@ -195,6 +220,11 @@ class CompilationSettings:
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         state.pop("use_python_runtime", None)
+        state["disabled_no_constant_fold_rules"] = (
+            _normalize_disabled_no_constant_fold_rules(
+                state.get("disabled_no_constant_fold_rules", ())
+            )
+        )
         state.setdefault("fallback_data_dependent_ops", FALLBACK_DATA_DEPENDENT_OPS)
         self.__dict__.update(state)
 
@@ -221,6 +251,7 @@ _SETTINGS_TO_BE_ENGINE_INVARIANT = {
     "autocast_max_depth_of_reduction",
     "autocast_calibration_dataloader",
     "decompose_attention",
+    "disabled_no_constant_fold_rules",
     "attn_bias_is_causal",
 }
 

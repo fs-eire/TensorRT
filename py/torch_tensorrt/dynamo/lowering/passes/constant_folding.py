@@ -4,6 +4,9 @@ from typing import Any, Set
 import torch
 from torch_tensorrt._utils import sanitized_torch_version
 from torch_tensorrt.dynamo._settings import CompilationSettings
+from torch_tensorrt.dynamo.lowering._no_constant_fold import (
+    NO_CONSTANT_FOLD_META_KEY,
+)
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import (
     clean_up_graph_after_modifications,
 )
@@ -125,4 +128,4 @@ class _TorchTensorRTConstantFolder(ConstantFolder):  # type: ignore[misc]
 
         if node.target in self.quantization_ops:
             return True
-        return False
+        return bool(node.meta.get(NO_CONSTANT_FOLD_META_KEY, False))
