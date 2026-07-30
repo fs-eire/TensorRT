@@ -153,6 +153,32 @@ class TestAttentionMaskNoConstantFold(TestCase):
             )
         )
 
+    def test_decomposed_attention_rules_can_be_disabled_at_post_lowering_only(self):
+        """post_lowering alone is enough to disable a rule.
+
+        get_decompositions is public API, so the manual lowering sequence used
+        by the examples can build the decompositions without knowing about the
+        disabled rules. The trace-time marks must be revoked at post_lowering
+        rather than relying on the caller to pass the setting to both.
+        """
+        exported_program = self._export().run_decompositions(
+            get_decompositions(decompose_attention=True)
+        )
+        gm = post_lowering(
+            exported_program.module(),
+            CompilationSettings(
+                disabled_no_constant_fold_rules={ATTENTION_MASK_ARANGE_RULE_ID}
+            ),
+        )
+        self.assertFalse(
+            any(
+                node.op == "call_function"
+                and getattr(node.target, "overloadpacket", None)
+                is torch.ops.aten.arange
+                for node in gm.graph.nodes
+            )
+        )
+
     def test_registered_rule_can_mark_an_arbitrary_node(self):
         def custom_target():
             return torch.ones(1)

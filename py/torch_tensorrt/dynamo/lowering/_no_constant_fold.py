@@ -42,9 +42,15 @@ def _find_ancestor_nodes(
     return matching_nodes
 
 
-def _mark_no_constant_fold(nodes: Iterable[torch.fx.Node]) -> None:
+def _mark_no_constant_fold(nodes: Iterable[torch.fx.Node], rule_id: str) -> None:
+    """Record which rule wants ``nodes`` kept out of constant folding.
+
+    The marks carry their rule ID rather than a bare flag so that
+    :func:`mark_no_constant_fold_nodes` can revoke the ones belonging to
+    disabled rules, whichever marking path produced them.
+    """
     for node in nodes:
-        node.meta[NO_CONSTANT_FOLD_META_KEY] = True
+        node.meta.setdefault(NO_CONSTANT_FOLD_META_KEY, set()).add(rule_id)
 
 
 def register_no_constant_fold_rule(
@@ -121,7 +127,8 @@ def mark_attn_mask_aranges_no_constant_fold(attn_mask: torch.Tensor) -> None:
 
     if isinstance(mask_node, torch.fx.Node):
         _mark_no_constant_fold(
-            _find_ancestor_nodes(mask_node, predicate=_is_arange_node)
+            _find_ancestor_nodes(mask_node, predicate=_is_arange_node),
+            ATTENTION_MASK_ARANGE_RULE_ID,
         )
 
 
@@ -158,7 +165,15 @@ def _attention_mask_arange_rule(node: torch.fx.Node) -> Iterable[torch.fx.Node]:
 def mark_no_constant_fold_nodes(
     gm: torch.fx.GraphModule, settings: Optional[Any] = None
 ) -> torch.fx.GraphModule:
-    """Apply registered rules that label FX nodes as non-foldable."""
+    """Apply registered rules that label FX nodes as non-foldable.
+
+    This pass is the single authority on which rules are in effect. It runs
+    immediately before ``constant_fold`` and is the only marking path that sees
+    ``settings``: rules that mark nodes while a decomposition is traced run
+    during ``run_decompositions``, long before a settings object is reachable.
+    Those marks are therefore revoked here rather than suppressed where they are
+    made, so a caller only has to communicate the disabled rules once.
+    """
     disabled_rule_ids = validate_disabled_no_constant_fold_rules(
         settings.disabled_no_constant_fold_rules if settings is not None else ()
     )
@@ -167,6 +182,12 @@ def mark_no_constant_fold_nodes(
         for rule_id, rule in _NO_CONSTANT_FOLD_RULES.items():
             if rule_id in disabled_rule_ids:
                 continue
-            _mark_no_constant_fold(rule(node))
+            _mark_no_constant_fold(rule(node), rule_id)
+
+    if disabled_rule_ids:
+        for node in gm.graph.nodes:
+            marking_rule_ids = node.meta.get(NO_CONSTANT_FOLD_META_KEY)
+            if marking_rule_ids:
+                marking_rule_ids -= disabled_rule_ids
 
     return gm

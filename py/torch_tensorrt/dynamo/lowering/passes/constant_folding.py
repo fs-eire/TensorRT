@@ -128,4 +128,6 @@ class _TorchTensorRTConstantFolder(ConstantFolder):  # type: ignore[misc]
 
         if node.target in self.quantization_ops:
             return True
-        return bool(node.meta.get(NO_CONSTANT_FOLD_META_KEY, False))
+        # The meta value holds the IDs of the rules that marked this node; it is
+        # empty once every rule that claimed it has been disabled.
+        return bool(node.meta.get(NO_CONSTANT_FOLD_META_KEY))
