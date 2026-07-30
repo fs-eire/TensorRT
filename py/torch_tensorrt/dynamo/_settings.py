@@ -62,12 +62,15 @@ from torch_tensorrt.dynamo._defaults import (
 def _normalize_disabled_no_constant_fold_rules(
     rule_ids: Collection[str],
 ) -> Set[str]:
-    if isinstance(rule_ids, str):
-        raise TypeError(
-            "disabled_no_constant_fold_rules must be a collection of rule IDs, "
-            "not a single string"
-        )
-    return set(rule_ids)
+    # Deferred import: torch_tensorrt.dynamo.lowering.passes imports this module,
+    # so importing the rule registry at module scope would be circular. Reaching
+    # for the submodule directly is safe from any point of that cycle because
+    # _no_constant_fold depends on nothing but torch.
+    from torch_tensorrt.dynamo.lowering._no_constant_fold import (
+        validate_disabled_no_constant_fold_rules,
+    )
+
+    return validate_disabled_no_constant_fold_rules(rule_ids)
 
 
 @dataclass

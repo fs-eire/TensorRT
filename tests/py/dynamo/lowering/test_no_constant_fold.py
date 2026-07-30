@@ -170,17 +170,12 @@ class TestAttentionMaskNoConstantFold(TestCase):
         self.assertTrue(custom_node.meta[NO_CONSTANT_FOLD_META_KEY])
 
     def test_unknown_disabled_rule_is_rejected(self):
-        graph = torch.fx.Graph()
-        graph.output(graph.call_function(torch.ops.aten.arange.default, (8,)))
-        gm = torch.fx.GraphModule({}, graph)
+        """Unknown IDs are caught where the user names them, not at lowering."""
         with self.assertRaisesRegex(
             ValueError,
             "Unknown no-constant-fold rule IDs",
         ):
-            mark_no_constant_fold_nodes(
-                gm,
-                CompilationSettings(disabled_no_constant_fold_rules={"unknown_rule"}),
-            )
+            CompilationSettings(disabled_no_constant_fold_rules={"unknown_rule"})
 
 
 class TestAttentionMaskArangeRuleCoverage(TestCase):
