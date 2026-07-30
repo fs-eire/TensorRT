@@ -128,9 +128,12 @@ def mark_attn_mask_aranges_no_constant_fold(attn_mask: torch.Tensor) -> None:
 @register_no_constant_fold_rule(ATTENTION_MASK_ARANGE_RULE_ID)
 def _attention_mask_arange_rule(node: torch.fx.Node) -> Iterable[torch.fx.Node]:
     """Select aranges feeding an attention mask."""
+    # Every SDPA overload that takes a mask keeps it at positional index 3.
+    # _scaled_dot_product_flash_attention is absent because it has no mask.
     attention_mask_args: dict[Any, tuple[int, str]] = {
         torch.ops.aten.scaled_dot_product_attention: (3, "attn_mask"),
         torch.ops.aten._scaled_dot_product_efficient_attention: (3, "attn_bias"),
+        torch.ops.aten._scaled_dot_product_cudnn_attention: (3, "attn_bias"),
     }
 
     if node.op != "call_function":

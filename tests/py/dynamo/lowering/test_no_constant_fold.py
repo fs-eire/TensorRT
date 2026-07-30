@@ -179,5 +179,45 @@ class TestAttentionMaskNoConstantFold(TestCase):
             )
 
 
+class TestAttentionMaskArangeRuleCoverage(TestCase):
+    """The rule must cover every SDPA overload that carries an attention mask.
+
+    These graphs are hand-built and never executed, so the coverage check does
+    not depend on which SDPA backend the local GPU happens to dispatch to.
+    """
+
+    MASKED_ATTENTION_OPS = (
+        (torch.ops.aten.scaled_dot_product_attention.default, "attn_mask"),
+        (torch.ops.aten._scaled_dot_product_efficient_attention.default, "attn_bias"),
+        (torch.ops.aten._scaled_dot_product_cudnn_attention.default, "attn_bias"),
+    )
+
+    def _attention_graph(self, target, mask_kwarg):
+        graph = torch.fx.Graph()
+        query = graph.placeholder("query")
+        key = graph.placeholder("key")
+        value = graph.placeholder("value")
+        arange = graph.call_function(torch.ops.aten.arange.default, (8,))
+        mask = graph.call_function(torch.ops.aten.unsqueeze.default, (arange, 0))
+        if mask_kwarg is None:
+            attention = graph.call_function(target, (query, key, value, mask))
+        else:
+            attention = graph.call_function(
+                target, (query, key, value), {mask_kwarg: mask}
+            )
+        graph.output(attention)
+        return torch.fx.GraphModule({}, graph), arange
+
+    def test_mask_aranges_are_marked_for_every_masked_attention_op(self):
+        for target, mask_kwarg in self.MASKED_ATTENTION_OPS:
+            for passed_as_kwarg in (False, True):
+                with self.subTest(target=target, passed_as_kwarg=passed_as_kwarg):
+                    gm, arange = self._attention_graph(
+                        target, mask_kwarg if passed_as_kwarg else None
+                    )
+                    mark_no_constant_fold_nodes(gm)
+                    self.assertTrue(arange.meta.get(NO_CONSTANT_FOLD_META_KEY))
+
+
 if __name__ == "__main__":
     run_tests()
