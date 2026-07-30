@@ -59,14 +59,12 @@ class TestAttentionMaskNoConstantFold(TestCase):
             node
             for node in gm.graph.nodes
             if node.op == "call_function"
-            and getattr(node.target, "overloadpacket", None)
-            is torch.ops.aten.arange
+            and getattr(node.target, "overloadpacket", None) is torch.ops.aten.arange
         ]
         self.assertEqual(len(arange_nodes), 2)
         self.assertTrue(
             all(
-                node.meta.get(NO_CONSTANT_FOLD_META_KEY, False)
-                for node in arange_nodes
+                node.meta.get(NO_CONSTANT_FOLD_META_KEY, False) for node in arange_nodes
             )
         )
 

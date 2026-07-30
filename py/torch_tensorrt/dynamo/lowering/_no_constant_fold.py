@@ -4,7 +4,6 @@ import torch
 from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
 from torch.fx.experimental.proxy_tensor import get_proxy_mode, get_proxy_slot
 
-
 NO_CONSTANT_FOLD_META_KEY = "_torch_tensorrt_no_constant_fold"
 ATTENTION_MASK_ARANGE_RULE_ID = "attention_mask_arange"
 
@@ -62,9 +61,7 @@ def register_no_constant_fold_rule(
 
     def register(rule: NoConstantFoldRule) -> NoConstantFoldRule:
         if rule_id in _NO_CONSTANT_FOLD_RULES:
-            raise ValueError(
-                f"No-constant-fold rule {rule_id!r} is already registered"
-            )
+            raise ValueError(f"No-constant-fold rule {rule_id!r} is already registered")
 
         _NO_CONSTANT_FOLD_RULES[rule_id] = rule
         return rule
