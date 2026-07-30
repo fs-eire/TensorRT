@@ -4,11 +4,11 @@ import torch
 from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
 from torch.fx.experimental.proxy_tensor import get_proxy_mode, get_proxy_slot
 
-NO_CONSTANT_FOLD_META_KEY = "_torch_tensorrt_no_constant_fold"
+CONSTANT_FOLD_EXCLUSION_META_KEY = "_torch_tensorrt_constant_fold_exclusions"
 ATTENTION_MASK_ARANGE_RULE_ID = "attention_mask_arange"
 
-NoConstantFoldRule = Callable[[torch.fx.Node], Iterable[torch.fx.Node]]
-_NO_CONSTANT_FOLD_RULES: dict[str, NoConstantFoldRule] = {}
+ConstantFoldExclusionRule = Callable[[torch.fx.Node], Iterable[torch.fx.Node]]
+_CONSTANT_FOLD_EXCLUSION_RULES: dict[str, ConstantFoldExclusionRule] = {}
 
 
 def _is_arange_node(node: torch.fx.Node) -> bool:
@@ -41,50 +41,52 @@ def _find_ancestor_nodes(
     return matching_nodes
 
 
-def _mark_no_constant_fold(nodes: Iterable[torch.fx.Node], rule_id: str) -> None:
+def _mark_constant_fold_exclusion(nodes: Iterable[torch.fx.Node], rule_id: str) -> None:
     """Record which rule wants ``nodes`` kept out of constant folding.
 
     The marks carry their rule ID rather than a bare flag so that
-    :func:`mark_no_constant_fold_nodes` can revoke the ones belonging to
+    :func:`mark_constant_fold_exclusions` can revoke the ones belonging to
     disabled rules, whichever marking path produced them.
     """
     for node in nodes:
-        node.meta.setdefault(NO_CONSTANT_FOLD_META_KEY, set()).add(rule_id)
+        node.meta.setdefault(CONSTANT_FOLD_EXCLUSION_META_KEY, set()).add(rule_id)
 
 
-def register_no_constant_fold_rule(
+def register_constant_fold_exclusion_rule(
     rule_id: str,
-) -> Callable[[NoConstantFoldRule], NoConstantFoldRule]:
+) -> Callable[[ConstantFoldExclusionRule], ConstantFoldExclusionRule]:
     """Register a named rule that selects FX nodes to exclude from folding."""
     if not isinstance(rule_id, str) or not rule_id:
-        raise ValueError("A no-constant-fold rule ID must be a non-empty string")
+        raise ValueError("A constant-fold exclusion rule ID must be a non-empty string")
 
-    def register(rule: NoConstantFoldRule) -> NoConstantFoldRule:
-        if rule_id in _NO_CONSTANT_FOLD_RULES:
-            raise ValueError(f"No-constant-fold rule {rule_id!r} is already registered")
+    def register(rule: ConstantFoldExclusionRule) -> ConstantFoldExclusionRule:
+        if rule_id in _CONSTANT_FOLD_EXCLUSION_RULES:
+            raise ValueError(
+                f"Constant-fold exclusion rule {rule_id!r} is already registered"
+            )
 
-        _NO_CONSTANT_FOLD_RULES[rule_id] = rule
+        _CONSTANT_FOLD_EXCLUSION_RULES[rule_id] = rule
         return rule
 
     return register
 
 
-def validate_disabled_no_constant_fold_rules(
+def validate_disabled_constant_fold_exclusions(
     rule_ids: Collection[str],
 ) -> set[str]:
     """Validate disabled rule IDs and return them as a set."""
     if isinstance(rule_ids, str):
         raise TypeError(
-            "disabled_no_constant_fold_rules must be a collection of rule IDs, "
+            "disabled_constant_fold_exclusions must be a collection of rule IDs, "
             "not a single string"
         )
 
     disabled_rule_ids = set(rule_ids)
-    unknown_rule_ids = disabled_rule_ids - _NO_CONSTANT_FOLD_RULES.keys()
+    unknown_rule_ids = disabled_rule_ids - _CONSTANT_FOLD_EXCLUSION_RULES.keys()
     if unknown_rule_ids:
-        available_rule_ids = ", ".join(sorted(_NO_CONSTANT_FOLD_RULES))
+        available_rule_ids = ", ".join(sorted(_CONSTANT_FOLD_EXCLUSION_RULES))
         raise ValueError(
-            "Unknown no-constant-fold rule IDs: "
+            "Unknown constant-fold exclusion rule IDs: "
             f"{sorted(unknown_rule_ids)}. Available rule IDs: "
             f"[{available_rule_ids}]"
         )
@@ -92,7 +94,7 @@ def validate_disabled_no_constant_fold_rules(
     return disabled_rule_ids
 
 
-def mark_attn_mask_aranges_no_constant_fold(attn_mask: torch.Tensor) -> None:
+def exclude_attn_mask_aranges_from_constant_fold(attn_mask: torch.Tensor) -> None:
     """Mark aranges behind an attention mask while tracing a decomposition.
 
     ``run_decompositions`` invokes decompositions once for functionalization and
@@ -113,13 +115,13 @@ def mark_attn_mask_aranges_no_constant_fold(attn_mask: torch.Tensor) -> None:
     mask_node = getattr(proxy, "node", None)
 
     if isinstance(mask_node, torch.fx.Node):
-        _mark_no_constant_fold(
+        _mark_constant_fold_exclusion(
             _find_ancestor_nodes(mask_node, predicate=_is_arange_node),
             ATTENTION_MASK_ARANGE_RULE_ID,
         )
 
 
-@register_no_constant_fold_rule(ATTENTION_MASK_ARANGE_RULE_ID)
+@register_constant_fold_exclusion_rule(ATTENTION_MASK_ARANGE_RULE_ID)
 def _attention_mask_arange_rule(node: torch.fx.Node) -> Iterable[torch.fx.Node]:
     """Select aranges feeding an attention mask."""
     # Every SDPA overload that takes a mask keeps it at positional index 3.
@@ -149,10 +151,10 @@ def _attention_mask_arange_rule(node: torch.fx.Node) -> Iterable[torch.fx.Node]:
     return _find_ancestor_nodes(mask, predicate=_is_arange_node)
 
 
-def mark_no_constant_fold_nodes(
+def mark_constant_fold_exclusions(
     gm: torch.fx.GraphModule, settings: Optional[Any] = None
 ) -> torch.fx.GraphModule:
-    """Apply registered rules that label FX nodes as non-foldable.
+    """Apply the registered rules that exclude FX nodes from constant folding.
 
     This pass is the single authority on which rules are in effect. It runs
     immediately before ``constant_fold`` and is the only marking path that sees
@@ -161,19 +163,19 @@ def mark_no_constant_fold_nodes(
     Those marks are therefore revoked here rather than suppressed where they are
     made, so a caller only has to communicate the disabled rules once.
     """
-    disabled_rule_ids = validate_disabled_no_constant_fold_rules(
-        settings.disabled_no_constant_fold_rules if settings is not None else ()
+    disabled_rule_ids = validate_disabled_constant_fold_exclusions(
+        settings.disabled_constant_fold_exclusions if settings is not None else ()
     )
 
     for node in gm.graph.nodes:
-        for rule_id, rule in _NO_CONSTANT_FOLD_RULES.items():
+        for rule_id, rule in _CONSTANT_FOLD_EXCLUSION_RULES.items():
             if rule_id in disabled_rule_ids:
                 continue
-            _mark_no_constant_fold(rule(node), rule_id)
+            _mark_constant_fold_exclusion(rule(node), rule_id)
 
     if disabled_rule_ids:
         for node in gm.graph.nodes:
-            marking_rule_ids = node.meta.get(NO_CONSTANT_FOLD_META_KEY)
+            marking_rule_ids = node.meta.get(CONSTANT_FOLD_EXCLUSION_META_KEY)
             if marking_rule_ids:
                 marking_rule_ids -= disabled_rule_ids
 

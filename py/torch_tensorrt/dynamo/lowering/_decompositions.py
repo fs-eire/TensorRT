@@ -14,6 +14,7 @@ from torch_tensorrt.dynamo._defaults import default_device
 from torch_tensorrt.dynamo.conversion.converter_utils import get_positive_dim
 from torch_tensorrt.dynamo.utils import to_torch_device
 
+from ._constant_fold_exclusions import exclude_attn_mask_aranges_from_constant_fold
 from ._decomposition_groups import (
     ENABLED_TORCH_DECOMPOSITIONS,
     TORCH_TRT_DECOMPOSITIONS,
@@ -22,7 +23,6 @@ from ._decomposition_groups import (
     torch_disabled_decompositions,
     torch_enabled_decompositions,
 )
-from ._no_constant_fold import mark_attn_mask_aranges_no_constant_fold
 
 logger = logging.getLogger(__name__)
 
@@ -495,9 +495,9 @@ def scaled_dot_product_attention_decomposition(
         attn_bias = attn_bias.masked_fill(temp_mask.logical_not(), float("-inf"))
 
     if attn_mask is not None:
-        # Unconditional: mark_no_constant_fold_nodes revokes these marks when the
+        # Unconditional: mark_constant_fold_exclusions revokes these marks when the
         # rule is disabled, so the decompositions do not need the setting.
-        mark_attn_mask_aranges_no_constant_fold(attn_mask)
+        exclude_attn_mask_aranges_from_constant_fold(attn_mask)
         if attn_mask.dtype == torch.bool:
             attn_bias = attn_bias.masked_fill(attn_mask.logical_not(), float("-inf"))
         else:

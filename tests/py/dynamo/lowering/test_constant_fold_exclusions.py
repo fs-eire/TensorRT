@@ -8,15 +8,15 @@ from torch_tensorrt.dynamo.lowering import (
     get_decompositions,
     post_lowering,
 )
-from torch_tensorrt.dynamo.lowering._no_constant_fold import (
+from torch_tensorrt.dynamo.lowering._constant_fold_exclusions import (
     ATTENTION_MASK_ARANGE_RULE_ID,
-    NO_CONSTANT_FOLD_META_KEY,
-    mark_no_constant_fold_nodes,
-    register_no_constant_fold_rule,
+    CONSTANT_FOLD_EXCLUSION_META_KEY,
+    mark_constant_fold_exclusions,
+    register_constant_fold_exclusion_rule,
 )
 
 
-class TestAttentionMaskNoConstantFold(TestCase):
+class TestAttentionMaskConstantFoldExclusion(TestCase):
     class AttentionWithCausalMask(torch.nn.Module):
         def forward(self, query, key, value, attention_mask):
             sequence_length = query.shape[-2]
@@ -43,7 +43,7 @@ class TestAttentionMaskNoConstantFold(TestCase):
         return torch.export.export(self.AttentionWithCausalMask(), inputs)
 
     def _assert_only_attention_aranges_survive(
-        self, decompose_attention, disabled_no_constant_fold_rules=()
+        self, decompose_attention, disabled_constant_fold_exclusions=()
     ):
         exported_program = self._export().run_decompositions(
             get_decompositions(decompose_attention=decompose_attention)
@@ -51,7 +51,7 @@ class TestAttentionMaskNoConstantFold(TestCase):
         gm = post_lowering(
             exported_program.module(),
             CompilationSettings(
-                disabled_no_constant_fold_rules=disabled_no_constant_fold_rules
+                disabled_constant_fold_exclusions=disabled_constant_fold_exclusions
             ),
         )
 
@@ -64,40 +64,41 @@ class TestAttentionMaskNoConstantFold(TestCase):
         self.assertEqual(len(arange_nodes), 2)
         self.assertTrue(
             all(
-                node.meta.get(NO_CONSTANT_FOLD_META_KEY, False) for node in arange_nodes
+                node.meta.get(CONSTANT_FOLD_EXCLUSION_META_KEY, False)
+                for node in arange_nodes
             )
         )
 
     def test_disabled_rules_default_to_empty(self):
-        self.assertEqual(CompilationSettings().disabled_no_constant_fold_rules, set())
+        self.assertEqual(CompilationSettings().disabled_constant_fold_exclusions, set())
         self.assertEqual(
             CompilationSettings(
-                disabled_no_constant_fold_rules=[ATTENTION_MASK_ARANGE_RULE_ID]
-            ).disabled_no_constant_fold_rules,
+                disabled_constant_fold_exclusions=[ATTENTION_MASK_ARANGE_RULE_ID]
+            ).disabled_constant_fold_exclusions,
             {ATTENTION_MASK_ARANGE_RULE_ID},
         )
         with self.assertRaisesRegex(TypeError, "collection of rule IDs"):
             CompilationSettings(
-                disabled_no_constant_fold_rules=ATTENTION_MASK_ARANGE_RULE_ID
+                disabled_constant_fold_exclusions=ATTENTION_MASK_ARANGE_RULE_ID
             )
 
     def test_old_serialized_setting_defaults_to_no_disabled_rules(self):
         state = CompilationSettings().__dict__.copy()
-        state.pop("disabled_no_constant_fold_rules")
+        state.pop("disabled_constant_fold_exclusions")
         restored = CompilationSettings.__new__(CompilationSettings)
         restored.__setstate__(state)
-        self.assertEqual(restored.disabled_no_constant_fold_rules, set())
+        self.assertEqual(restored.disabled_constant_fold_exclusions, set())
 
     def test_setting_changes_engine_compatibility(self):
         compatible, incompatible_settings = settings_are_compatible(
             CompilationSettings(),
             CompilationSettings(
-                disabled_no_constant_fold_rules={ATTENTION_MASK_ARANGE_RULE_ID}
+                disabled_constant_fold_exclusions={ATTENTION_MASK_ARANGE_RULE_ID}
             ),
         )
         self.assertFalse(compatible)
         self.assertIn(
-            "disabled_no_constant_fold_rules",
+            "disabled_constant_fold_exclusions",
             incompatible_settings,
         )
 
@@ -114,7 +115,7 @@ class TestAttentionMaskNoConstantFold(TestCase):
         gm = post_lowering(
             exported_program.module(),
             CompilationSettings(
-                disabled_no_constant_fold_rules={ATTENTION_MASK_ARANGE_RULE_ID}
+                disabled_constant_fold_exclusions={ATTENTION_MASK_ARANGE_RULE_ID}
             ),
         )
         self.assertFalse(
@@ -139,7 +140,7 @@ class TestAttentionMaskNoConstantFold(TestCase):
         gm = post_lowering(
             exported_program.module(),
             CompilationSettings(
-                disabled_no_constant_fold_rules={ATTENTION_MASK_ARANGE_RULE_ID}
+                disabled_constant_fold_exclusions={ATTENTION_MASK_ARANGE_RULE_ID}
             ),
         )
         self.assertFalse(
@@ -160,20 +161,20 @@ class TestAttentionMaskNoConstantFold(TestCase):
         graph.output(custom_node)
         gm = torch.fx.GraphModule({}, graph)
 
-        @register_no_constant_fold_rule("test_arbitrary_node")
+        @register_constant_fold_exclusion_rule("test_arbitrary_node")
         def custom_rule(node):
             return (node,) if node.target is custom_target else ()
 
-        mark_no_constant_fold_nodes(gm)
-        self.assertTrue(custom_node.meta[NO_CONSTANT_FOLD_META_KEY])
+        mark_constant_fold_exclusions(gm)
+        self.assertTrue(custom_node.meta[CONSTANT_FOLD_EXCLUSION_META_KEY])
 
     def test_unknown_disabled_rule_is_rejected(self):
         """Unknown IDs are caught where the user names them, not at lowering."""
         with self.assertRaisesRegex(
             ValueError,
-            "Unknown no-constant-fold rule IDs",
+            "Unknown constant-fold exclusion rule IDs",
         ):
-            CompilationSettings(disabled_no_constant_fold_rules={"unknown_rule"})
+            CompilationSettings(disabled_constant_fold_exclusions={"unknown_rule"})
 
 
 class TestAttentionMaskArangeRuleCoverage(TestCase):
@@ -212,8 +213,8 @@ class TestAttentionMaskArangeRuleCoverage(TestCase):
                     gm, arange = self._attention_graph(
                         target, mask_kwarg if passed_as_kwarg else None
                     )
-                    mark_no_constant_fold_nodes(gm)
-                    self.assertTrue(arange.meta.get(NO_CONSTANT_FOLD_META_KEY))
+                    mark_constant_fold_exclusions(gm)
+                    self.assertTrue(arange.meta.get(CONSTANT_FOLD_EXCLUSION_META_KEY))
 
 
 if __name__ == "__main__":
