@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
 
+import json
 import unittest
 
+import tensorrt as trt
 import torch
 import torch_tensorrt
 from parameterized import parameterized
@@ -2067,6 +2069,57 @@ class TestLowering(TestCase):
         self.assertIs(where_nodes[0].args[0], logical_not_nodes[0])
         torch.testing.assert_close(
             lowered.module()(*inputs),
+            exported_program.module()(*inputs),
+            rtol=RTOL,
+            atol=ATOL,
+        )
+
+    def test_lowering_scaled_dot_product_attention_causal_bias(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, query, key, value):
+                return torch.ops.aten.scaled_dot_product_attention.default(
+                    query, key, value, None, 0.0, True
+                )
+
+        inputs = (
+            torch.randn(1, 2, 32, 64, dtype=torch.float16, device="cuda"),
+            torch.randn(1, 2, 32, 64, dtype=torch.float16, device="cuda"),
+            torch.randn(1, 2, 32, 64, dtype=torch.float16, device="cuda"),
+        )
+        exported_program = torch.export.export(TestModule(), inputs)
+        serialized_engine = (
+            torch_tensorrt.dynamo.convert_exported_program_to_serialized_trt_engine(
+                exported_program,
+                inputs=inputs,
+                min_block_size=1,
+                decompose_attention=True,
+            )
+        )
+        runtime = trt.Runtime(trt.Logger(trt.Logger.WARNING))
+        engine = runtime.deserialize_cuda_engine(serialized_engine)
+        inspector = engine.create_engine_inspector()
+        engine_info = json.loads(
+            inspector.get_engine_information(trt.LayerInformationFormat.JSON)
+        )
+        layers = engine_info.get("Layers", [])
+        layer_names = [
+            layer if isinstance(layer, str) else layer.get("Name", "")
+            for layer in layers
+        ]
+        self.assertTrue(
+            any("mha" in name.lower() for name in layer_names),
+            "No fused MHA layer found in the compiled causal-attention engine. "
+            f"Layer names present: {layer_names}",
+        )
+
+        compiled = torch_tensorrt.dynamo.compile(
+            exported_program,
+            inputs=inputs,
+            min_block_size=1,
+            decompose_attention=True,
+        )
+        torch.testing.assert_close(
+            compiled(*inputs),
             exported_program.module()(*inputs),
             rtol=RTOL,
             atol=ATOL,

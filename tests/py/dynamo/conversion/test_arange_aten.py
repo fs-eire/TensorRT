@@ -15,6 +15,11 @@ from .harness import DispatchTestCase
 
 
 class TestArangeConverter(DispatchTestCase):
+    def test_sequence_dtype_checks_all_operands(self):
+        self.assertEqual(
+            impl.arange._sequence_dtype(None, 1, 5.0, 1.3), trt.DataType.FLOAT
+        )
+
     def test_static_arange_uses_linspace_fill(self):
         logger = trt.Logger(trt.Logger.ERROR)
         builder = trt.Builder(logger)
@@ -43,6 +48,7 @@ class TestArangeConverter(DispatchTestCase):
             fill_layers[0].name,
             "[FILL]-[aten_ops.arange.start_step]-[arange_arange_fill]",
         )
+        self.assertIsNone(fill_layers[0].get_input(0))
         self.assertEqual(tuple(output.shape), (5,))
 
     @parameterized.expand(
